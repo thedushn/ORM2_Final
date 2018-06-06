@@ -21,18 +21,17 @@
 #define min(a,b) ((a) < (b) ? (a) : (b))
 
 #include "pcap.h"
-//#include "tinycthread.h"
-#include "pthread.h"
+#include "tinycthread.h"
 
 void server_init(char *recvfile);
 void client_init(char* send_file);
-//mtx_t mutex;
 pthread_mutex_t mutex;
-#define SIGNATURE 1111 //54654
+
+#define SIGNATURE 54654
 #define ACK_TRIES 10
-//\\Device\\NPF_{95803CA8-BCA8-4E3D-923C-5868F019B9DE
+
 char devices_client[][64] = { "eth0", "wlan1" };
-char devices_server[][64] = { "eth0" ,"wlan1" };
+char devices_server[][64] = { "eth0", "wlan1" };
 #define N_DEVICES 2
 
 // za klijenta (i server koristi iste podatke samo ih cita obrnuto)
@@ -47,11 +46,9 @@ char macs[][6] = {"\x2c\x4d\x54\x56\x99\xea",// dmac dev0
 int main(int argc, char* argv[])
 {
 	pthread_mutex_init(&mutex,NULL);
-	//mtx_init(&mutex, mtx_plain);
 	if (argc != 3) return 0;
 	char* filename = argv[2];
 	char* role = argv[1];
-	
 	if (strcmp(role, "server") == 0) {
 		printf("setting up server\n");
 		server_init(filename);
@@ -61,7 +58,6 @@ int main(int argc, char* argv[])
 	}
 	pthread_mutex_destroy(&mutex);
 
-	//mtx_destroy(&mutex);
 	return 0;
 }
 
@@ -104,9 +100,7 @@ struct eth_header {
 struct my_header {
 	// handled by packet_process
 	enum packet_type type;
-	
 	int signature;
-	
 	int data_size;
 	int sum;
 
@@ -164,9 +158,8 @@ int packet_size(const struct packet* pkt) {
 
 void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
 	int i;
-	pkt->ethernet.type = htons(0x0800);
-	pkt->header.signature = htons(SIGNATURE);
-	
+	pkt->ethernet.type = 0x0800;
+	pkt->header.signature = SIGNATURE;
 	pkt->header.data_size = data_size;
 	pkt->header.sum = 0;
 	pkt->header.type = type;
@@ -198,8 +191,7 @@ void send_packet(pcap_t* p, struct packet* pkt, enum packet_type type, int data_
 	printf("S=");
 	print_mac(pkt->ethernet.smac);
 	printf(")\n");
-	printf("what the packet says%s\n",(u_char*)pkt);
-	pcap_sendpacket(p, (const u_char*)pkt,packet_size(pkt)); // 
+	pcap_sendpacket(p, (const u_char*)pkt, packet_size(pkt));
 }
 
 void send_ack(context* t, int ack_id) {
@@ -238,13 +230,11 @@ void client(context *c) {
 		printf("Sending packet %d\n", packet_to_send);
 		int size = min(PACKET_SIZE, file_size - PACKET_SIZE*packet_to_send);
 
-		// ucitaj paket+
- 		pthread_mutex_lock(&mutex);
-		//mtx_lock(&mutex);
+		// ucitaj paket
+			pthread_mutex_lock(&mutex);
 		fseek(file, packet_to_send*PACKET_SIZE, SEEK_SET);
 		fread(pkt.data, 1, size, file);
-		//mtx_unlock(&mutex);
-		pthread_mutex_unlock(&mutex);
+			pthread_mutex_unlock(&mutex);
 		pkt.header.offset = packet_to_send*PACKET_SIZE;
 		pkt.header.ack_id = rand() % 5000;
 		send_packet(c->p, &pkt, pkt_data, size);
@@ -301,8 +291,8 @@ void client_init(char* send_file) {
 			return;
 		}
 	}
+
 	pthread_t threads[N_DEVICES];	
-	//thrd_t threads[N_DEVICES];
 	context ctx[N_DEVICES];
 	file = fopen(send_file, "rb");
 	if (!file)  {
@@ -329,18 +319,16 @@ void client_init(char* send_file) {
 		memcpy(ctx[i].dmac, macs[i * 2], 6);
 		memcpy(ctx[i].smac, macs[i * 2 + 1], 6);
 		pthread_create(&threads[i], NULL,(void *)client, &ctx[i]);
-	//	thrd_create(&threads[i], (thrd_start_t)client, &ctx[i]);
 	}
 	printf("Waiting for transfer to finish\n");
 	for (i = 0; i < N_DEVICES; i++) {
-			pthread_join(threads[i], 0);
-		//thrd_join(threads[i], 0);
+		 pthread_join(threads[i], 0);
 	}time(&end);
 	int a;
 	seconds = difftime(end, start);
 	printf("File transfer took %.2lf seconds to run.\n", seconds);
 	printf("Sending finished\n");
-	//scanf("%d", &a);
+	
 	
 }
 
@@ -348,14 +336,14 @@ void client_init(char* send_file) {
 void server(void* m) {
 	struct pcap_pkthdr d;
 	struct packet *pkt;
-	int mac_initialized = 0;
 	struct t_context *c=m;
+	int mac_initialized = 0;
 	while (1) {
 		const char * data = pcap_next(c->p, &d);
 		
 		if (!data) continue;
 		
-			
+		
 		pkt = (struct packet*)data;
 		if(pkt->header.signature != SIGNATURE) continue;
 		
@@ -366,13 +354,10 @@ void server(void* m) {
 		}
 		printf("Received pkt type %d %d\n", pkt->header.type, pkt->header.offset);
 		if (pkt->header.type == pkt_data) {
-			//mtx_lock(&mutex);
 			pthread_mutex_lock(&mutex);
-			printf("%s",pkt->data);
 			printf("Writing data: offs: %d size: %d\n", pkt->header.offset, pkt->header.data_size);
 			fseek(file, pkt->header.offset, SEEK_SET);
 			fwrite(pkt->data, 1, pkt->header.data_size, file);
-			//mtx_unlock(&mutex);
 			pthread_mutex_unlock(&mutex);
 			send_ack(c, pkt->header.ack_id);
 		}
@@ -405,28 +390,23 @@ void server_init(char *recvfile) {
 	}
 
 	pthread_t threads[N_DEVICES];
-//	thrd_t threads[N_DEVICES];
 	struct t_context mak[N_DEVICES];
-//	context ctx[N_DEVICES];
 	file = fopen(recvfile, "wb");
 
 	for (i = 0; i < N_DEVICES; i++) {
-		//ctx[i].p = dev[i];
-		mak[i].p=dev[i];
-	//	memcpy(ctx[i].dmac, macs[i * 2 + 1], 6);
-	//	memcpy(ctx[i].smac, macs[i * 2], 6);
+			mak[i].p=dev[i];
+	
 		memcpy(mak[i].dmac, macs[i * 2 + 1], 6);
 		memcpy(mak[i].smac, macs[i * 2], 6);
-		//thrd_create(&threads[i], (thrd_start_t)server, &ctx[i]);
 		 pthread_create(&threads[i], NULL,(void *)server, &mak[i]);
 	}
 
 	for (i = 0; i < N_DEVICES; i++) {
 		 pthread_join(threads[i], 0);
-		//thrd_join(threads[i], 0);
 	}
+
 	printf("Receiving finished\n");
-	pcap_close(dev[0]);
+pcap_close(dev[0]);
 	pcap_close(dev[1]);
 	fclose(file);
 }
