@@ -160,14 +160,15 @@ in_cksum(unsigned short *addr, int len)
 }
 
 void
-ip_output(struct ip *ip_header, int *len)
+ip_output(struct ip *ip_header, int len)
 {
-    *len += sizeof(struct ip);
+    int len2=len+sizeof(struct ip);
+
 
     ip_header->ip_v= 4;
     ip_header->ip_hl= 5;
     ip_header->ip_tos =htons (0x0004);
-    ip_header->ip_len = htons(sizeof(struct my_header)+PACKET_SIZE);
+    ip_header->ip_len = htons(len2);
     ip_header->ip_id = htons(0x0001);
     ip_header->ip_off = 0;
     ip_header->ip_ttl = htons(16);
@@ -177,6 +178,7 @@ ip_output(struct ip *ip_header, int *len)
     ip_header->ip_dst.s_addr = 0xFFFFFFFF;
 
     ip_header->ip_sum = in_cksum((unsigned short *) ip_header, sizeof(struct ip));
+
 }
 int wait_for_ack(pcap_t* p, int ack_id) {
     struct pcap_pkthdr d;
@@ -213,11 +215,23 @@ int packet_size(const struct packet* pkt) {
 
 void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
     int i=1500;
-   // pkt->ethernet.type = 0x0000;
+    pkt->udp_hdr.uh_dport=htons(0x080);
+    pkt->udp_hdr.uh_sport=htons(0x080);
+/*    pkt->udp_hdr.len=htons(sizeof(struct my_header)+PACKET_SIZE);*/
+    if(data_size==0){
+        pkt->udp_hdr.uh_ulen=htons(sizeof(struct my_header));
+    }else{
+
+        pkt->udp_hdr.uh_ulen=htons(data_size);
+    }
+
+    pkt->udp_hdr.uh_sum=htons(0);
+
+
     pkt->ethernet.h_proto = htons(0x0800);
     pkt->header.signature = SIGNATURE;
     pkt->header.data_size = data_size;
-    ip_output(&pkt->ip2,&i);
+    ip_output(&pkt->ip2,data_size+sizeof(struct my_header));
     pkt->header.sum = 0;
     pkt->header.type = type;
     for(i=0; i < data_size; i++) {
