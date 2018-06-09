@@ -19,6 +19,7 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <time.h>
+#include "arpa/inet.h"
 #endif
 #include <string.h>
 
@@ -44,6 +45,14 @@ char macs[][6] = {"\x2c\x4d\x54\x56\x99\xea",// dmac dev0
 
                   "\x00\x0f\x60\x06\x07\x14",// dmac dev1 00:0f:60:06:07:14
                   "\x00\x0f\x60\x06\x07\x14" // smac dev1
+};
+struct pseudo_header
+{
+    u_int32_t source_address;
+    u_int32_t dest_address;
+    u_int8_t placeholder;
+    u_int8_t protocol;
+    u_int16_t udp_length;
 };
 
 
@@ -162,19 +171,19 @@ in_cksum(unsigned short *addr, int len)
 void
 ip_output(struct ip *ip_header, int len)
 {
-    int len2=len+sizeof(struct ip);
+
 
 
     ip_header->ip_v= 4;
     ip_header->ip_hl= 5;
     ip_header->ip_tos =htons (0x0004);
-    ip_header->ip_len = htons(len2);
+    ip_header->ip_len = htons(len);
     ip_header->ip_id = htons(0x0001);
     ip_header->ip_off = 0;
-    ip_header->ip_ttl = htons(16);
+    ip_header->ip_ttl = 64;
     ip_header->ip_p = IPPROTO_UDP;
-    ip_header->ip_sum = 0;
-    ip_header->ip_src.s_addr = 0;
+    ip_header->ip_sum = htons(0x0000);
+    ip_header->ip_src.s_addr = inet_addr("10.0.2.15");
     ip_header->ip_dst.s_addr = 0xFFFFFFFF;
 
     ip_header->ip_sum = in_cksum((unsigned short *) ip_header, sizeof(struct ip));
@@ -214,29 +223,46 @@ int packet_size(const struct packet* pkt) {
 }
 
 void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
-    int i=1500;
-    pkt->udp_hdr.uh_dport=htons(0x080);
-    pkt->udp_hdr.uh_sport=htons(0x080);
-/*    pkt->udp_hdr.len=htons(sizeof(struct my_header)+PACKET_SIZE);*/
+
+    int size = sizeof(struct iphdr)+sizeof(struct udphdr)+data_size+sizeof(struct my_header);
+    pkt->ethernet.h_proto = htons(0x0800);
+    ip_output(&pkt->ip2,size);
+    pkt->udp_hdr.uh_dport=htons(0x0080);
+    pkt->udp_hdr.uh_sport=htons(0x0340);
+
     if(data_size==0){
-        pkt->udp_hdr.uh_ulen=htons(sizeof(struct my_header));
+        pkt->udp_hdr.uh_ulen=htons(8+sizeof(struct my_header));
     }else{
 
-        pkt->udp_hdr.uh_ulen=htons(data_size);
+        pkt->udp_hdr.uh_ulen=htons(8 + data_size+sizeof(struct my_header));
     }
 
-    pkt->udp_hdr.uh_sum=htons(0);
+    pkt->udp_hdr.uh_sum=htons(0x00000000);
 
 
-    pkt->ethernet.h_proto = htons(0x0800);
+
     pkt->header.signature = SIGNATURE;
     pkt->header.data_size = data_size;
-    ip_output(&pkt->ip2,data_size+sizeof(struct my_header));
+
     pkt->header.sum = 0;
     pkt->header.type = type;
-    for(i=0; i < data_size; i++) {
+    for(int i=0; i < data_size; i++) {
         pkt->header.sum += pkt->data[i];
     }
+    struct pseudo_header psh;
+    //Now the UDP checksum using the pseudo header
+    psh.source_address = htons(0x00000000);
+    psh.dest_address = 0xFFFFFFFF;
+    psh.placeholder = 0;
+    psh.protocol = IPPROTO_UDP;
+    psh.udp_length = htons(sizeof(struct udphdr) +  data_size );
+    int psize=sizeof(struct my_header)+ sizeof(struct udphdr) + data_size;
+    char *pseudogram;
+    pseudogram = malloc(psize);
+    memcpy(pseudogram , (char*) &psh , sizeof (struct pseudo_header));
+    memcpy(pseudogram + sizeof(struct pseudo_header) , &pkt->udp_hdr , sizeof(struct udphdr) +sizeof(struct my_header)+data_size );
+
+    pkt->udp_hdr.uh_sum=in_cksum((unsigned short *)pseudogram , psize);
 }
 
 
