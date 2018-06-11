@@ -34,15 +34,16 @@ pthread_mutex_t mutex;
 
 #define SIGNATURE 54654
 #define ACK_TRIES 10
-
-char devices_client[][64] = { /*"eth0",*/ "wlan0" };
-char devices_server[][64] = { /*"eth0",*/ "wlan1" };
-#define N_DEVICES 1
-
+char ip_src[][64]={"10.81.2.102"};
+char ip_dst[][64]={"10.81.2.94"};
+char devices_client[][64] = { "eth0", "wlan0" };
+char devices_server[][64] = { "eth0", "wlan1" };
+#define N_DEVICES 2
+pthread_t threads[N_DEVICES];
 // za klijenta (i server koristi iste podatke samo ih cita obrnuto)
 char macs[][6] = {
-      /*  "\x2c\x4d\x54\xd0\x63\xb8",// dmac dev0  2c:4d:54:56:99:eb
-        "\x2c\x4d\x54\x56\x99\xeb", // smac dev0*/
+        "\x2c\x4d\x54\xd0\x63\xb8",// dmac dev0  2c:4d:54:56:99:eb
+        "\x2c\x4d\x54\x56\x99\xeb", // smac dev0
 
 
 
@@ -89,6 +90,7 @@ int *packets;
 struct t_context {
     char smac[6];
     char dmac[6];
+    char name[6];
     pcap_t* p;
 };
 
@@ -271,11 +273,11 @@ void send_packet(pcap_t* p, struct packet* pkt, enum packet_type type, int data_
     packet_process(pkt, type, data_size);
     printf("Sending packet size: %d (", pkt->header.data_size);
     printf("D=");
-    /*   print_mac(pkt->ethernet.dmac);
+       print_mac(pkt->ethernet.h_dest);
        printf("\t");
        printf("S=");
-       print_mac(pkt->ethernet.smac);
-       printf(")\n");*/
+       print_mac(pkt->ethernet.h_source);
+       printf(")\n");
     pcap_sendpacket(p, (const u_char*)pkt, packet_size(pkt));
 }
 
@@ -427,11 +429,29 @@ void client_init(char* send_file) {
 void server(context *c) {
     struct pcap_pkthdr d;
     struct packet *pkt;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    const char * data;
    // struct t_context *c=m;
     int mac_initialized = 0;
     while (1) {
-        const char * data = pcap_next(c->p, &d);
+      int err  = pcap_next_ex(c->p, &d,&data);
 
+
+        if(err == 0)
+            continue;
+        if (err == -1) {
+            c->p = NULL;
+
+            do {
+                printf("Hello someone touched things\n");
+
+                c->p = pcap_open_live(c->name, 65536,            // portion of the packet to capture.
+                        // 65536 grants that the whole packet will be captured on all the MACs.
+                                      1,                // promiscuous mode (nonzero means promiscuous)
+                                      1000,            // read timeout
+                                      errbuf);
+            } while (c->p == NULL);
+        }
         if (!data) continue;
 
 
@@ -459,6 +479,7 @@ void server(context *c) {
         }
         printf("Waiting for next pkt\n");
     }
+
 }
 
 void server_init(char *recvfile) {
@@ -482,7 +503,7 @@ void server_init(char *recvfile) {
         }
     }
 
-    pthread_t threads[N_DEVICES];
+
     struct t_context mak[N_DEVICES];
     file = fopen(recvfile, "wb");
 
@@ -491,6 +512,7 @@ void server_init(char *recvfile) {
 
         memcpy(mak[i].dmac, macs[i * 2 + 1], 6);
         memcpy(mak[i].smac, macs[i * 2], 6);
+        strcpy(mak[i].name,devices_server[i]);
         pthread_create(&threads[i], NULL,(void *)server, &mak[i]);
     }
 
