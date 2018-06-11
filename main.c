@@ -36,15 +36,15 @@ pthread_mutex_t mutex;
 #define ACK_TRIES 10
 
 char devices_client[][64] = { "eth0", "wlan0" };
-char devices_server[][64] = { "eth0", "wlan0" };
+char devices_server[][64] = { "eth0", "wlan1" };
 #define N_DEVICES 2
 
 // za klijenta (i server koristi iste podatke samo ih cita obrnuto)
-char macs[][6] = {"\xb8\x27\xeb\xec\xd5\x10",// dmac dev0
-                  "\xb8\x27\xeb\xec\xd5\x10",// smac dev0
+char macs[][6] = {"\x2c\x4d\x54\x56\x99\xeb",// dmac dev0  2c:4d:54:56:99:eb
+                  "\x2c\x4d\x54\xd0\x63\xb8",// smac dev0
 
-                  "\xb8\x27\xeb\xb9\x80\x45",// dmac dev1 00:0f:60:06:07:14
-                  "\xb8\x27\xeb\xb9\x80\x45" // smac dev1  b8:27:eb:b9:80:45
+                  "\x00\x0f\x60\x05\x53\x94",// dmac dev1 00:0f:60:06:07:14
+                  "\x00\x0f\x60\x04\x51\xe2" // smac dev1  b8:27:eb:b9:80:45
 };
 struct pseudo_header
 {
@@ -71,7 +71,7 @@ int main(int argc, char* argv[])
     }
     pthread_mutex_destroy(&mutex);
 
-        struct ethhdr;
+    struct ethhdr;
     return 0;
 }
 
@@ -200,12 +200,12 @@ int wait_for_ack(pcap_t* p, int ack_id) {
         if (pkt->header.signature != SIGNATURE) continue;
 
         printf("Received: %d,  %d = %d (", pkt->header.type, pkt->header.ack_id, ack_id,")");
-     /*   printf("D=");
-        print_mac(pkt->ethernet.dmac);
-        printf("\t");
-        printf("S=");
-        print_mac(pkt->ethernet.smac);
-        printf(") \n");*/
+        /*   printf("D=");
+           print_mac(pkt->ethernet.dmac);
+           printf("\t");
+           printf("S=");
+           print_mac(pkt->ethernet.smac);
+           printf(") \n");*/
 
         if (pkt->header.type == pkt_ack) {
             if (pkt->header.ack_id == ack_id) {
@@ -263,10 +263,10 @@ void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
     memcpy(pseudogram + sizeof(struct pseudo_header) , &pkt->udp_hdr , sizeof(struct udphdr) +sizeof(struct my_header)+data_size );
 
     pkt->udp_hdr.uh_sum=in_cksum((unsigned short *)pseudogram , psize);
-	if(pseudogram!=NULL){
-	free(pseudogram);
-	}
-	
+    if(pseudogram!=NULL){
+        free(pseudogram);
+    }
+
 }
 
 
@@ -275,11 +275,11 @@ void send_packet(pcap_t* p, struct packet* pkt, enum packet_type type, int data_
     packet_process(pkt, type, data_size);
     printf("Sending packet size: %d (", pkt->header.data_size);
     printf("D=");
- /*   print_mac(pkt->ethernet.dmac);
-    printf("\t");
-    printf("S=");
-    print_mac(pkt->ethernet.smac);
-    printf(")\n");*/
+    /*   print_mac(pkt->ethernet.dmac);
+       printf("\t");
+       printf("S=");
+       print_mac(pkt->ethernet.smac);
+       printf(")\n");*/
     pcap_sendpacket(p, (const u_char*)pkt, packet_size(pkt));
 }
 
@@ -287,8 +287,8 @@ void send_ack(context* t, int ack_id) {
     struct packet pkt;
     memcpy(pkt.ethernet.h_dest, t->dmac, 6);
     memcpy(pkt.ethernet.h_source, t->smac, 6);
-  /*  memcpy(pkt.ethernet.dmac, t->dmac, 6);
-    memcpy(pkt.ethernet.smac, t->smac, 6);*/
+    /*  memcpy(pkt.ethernet.dmac, t->dmac, 6);
+      memcpy(pkt.ethernet.smac, t->smac, 6);*/
     pkt.header.ack_id = ack_id;
     send_packet(t->p, &pkt, pkt_ack, 0);
 }
@@ -302,8 +302,8 @@ void client(context *c) {
     struct packet pkt;
     memcpy(pkt.ethernet.h_dest, c->dmac, 6);
     memcpy(pkt.ethernet.h_source, c->smac, 6);
-   /* memcpy(pkt.ethernet.dmac, c->dmac, 6);
-    memcpy(pkt.ethernet.smac, c->smac, 6);*/
+    /* memcpy(pkt.ethernet.dmac, c->dmac, 6);
+     memcpy(pkt.ethernet.smac, c->smac, 6);*/
     printf("Sending file with size %d\n", file_size);
     int ack_id = 0;
     while (1) {
@@ -381,7 +381,7 @@ void client_init(char* send_file) {
                     fprintf(stderr, " (No description available)\n");
             }
             /* Free the device list */
-		 pcap_freealldevs(alldevs);
+            pcap_freealldevs(alldevs);
             return;
         }
     }
@@ -418,12 +418,12 @@ void client_init(char* send_file) {
     for (i = 0; i < N_DEVICES; i++) {
         pthread_join(threads[i], 0);
     }time(&end);
-    int a;
+
     seconds = difftime(end, start);
     printf("File transfer took %.2lf seconds to run.\n", seconds);
     printf("Sending finished\n");
 
-	free(packets);
+    free(packets);
 
 
 }
@@ -446,8 +446,8 @@ void server(void* m) {
         if(mac_initialized == 0) {
             memcpy(c->dmac, pkt->ethernet.h_dest, 6);
             memcpy(c->smac, pkt->ethernet.h_source, 6);
-           /* memcpy(c->dmac, pkt->ethernet.smac, 6);
-            memcpy(c->smac, pkt->ethernet.dmac, 6);*/
+            /* memcpy(c->dmac, pkt->ethernet.smac, 6);
+             memcpy(c->smac, pkt->ethernet.dmac, 6);*/
             mac_initialized = 1;
         }
         printf("Received pkt type %d %d\n", pkt->header.type, pkt->header.offset);
