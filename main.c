@@ -35,16 +35,16 @@ pthread_mutex_t mutex;
 #define SIGNATURE 54654
 #define ACK_TRIES 10
 
-char devices_client[][64] = { "enp0s3", "wlan1" };
-char devices_server[][64] = { "enp0s3", "wlan1" };
-#define N_DEVICES 1
+char devices_client[][64] = { "eth0", "wlan0" };
+char devices_server[][64] = { "eth0", "wlan0" };
+#define N_DEVICES 2
 
 // za klijenta (i server koristi iste podatke samo ih cita obrnuto)
-char macs[][6] = {"\x2c\x4d\x54\x56\x99\xea",// dmac dev0
-                  "\x2c\x4d\x54\x56\x99\xea",// smac dev0
+char macs[][6] = {"\xb8\x27\xeb\xec\xd5\x10",// dmac dev0
+                  "\xb8\x27\xeb\xec\xd5\x10",// smac dev0
 
-                  "\x00\x0f\x60\x06\x07\x14",// dmac dev1 00:0f:60:06:07:14
-                  "\x00\x0f\x60\x06\x07\x14" // smac dev1
+                  "\xb8\x27\xeb\xb9\x80\x45",// dmac dev1 00:0f:60:06:07:14
+                  "\xb8\x27\xeb\xb9\x80\x45" // smac dev1  b8:27:eb:b9:80:45
 };
 struct pseudo_header
 {
@@ -183,8 +183,8 @@ ip_output(struct ip *ip_header, int len)
     ip_header->ip_ttl = 64;
     ip_header->ip_p = IPPROTO_UDP;
     ip_header->ip_sum = htons(0x0000);
-    ip_header->ip_src.s_addr = inet_addr("10.0.2.15");
-    ip_header->ip_dst.s_addr = 0xFFFFFFFF;
+    ip_header->ip_src.s_addr = inet_addr("192.168.0.15");
+    ip_header->ip_dst.s_addr =  inet_addr("192.168.0.15");;
 
     ip_header->ip_sum = in_cksum((unsigned short *) ip_header, sizeof(struct ip));
 
@@ -227,8 +227,8 @@ void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
     int size = sizeof(struct iphdr)+sizeof(struct udphdr)+data_size+sizeof(struct my_header);
     pkt->ethernet.h_proto = htons(0x0800);
     ip_output(&pkt->ip2,size);
-    pkt->udp_hdr.uh_dport=htons(0x0080);
-    pkt->udp_hdr.uh_sport=htons(0x0340);
+    pkt->udp_hdr.uh_dport=htons(0x1040);
+    pkt->udp_hdr.uh_sport=htons(0x2040);
 
     if(data_size==0){
         pkt->udp_hdr.uh_ulen=htons(8+sizeof(struct my_header));
@@ -263,6 +263,10 @@ void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
     memcpy(pseudogram + sizeof(struct pseudo_header) , &pkt->udp_hdr , sizeof(struct udphdr) +sizeof(struct my_header)+data_size );
 
     pkt->udp_hdr.uh_sum=in_cksum((unsigned short *)pseudogram , psize);
+	if(pseudogram!=NULL){
+	free(pseudogram);
+	}
+	
 }
 
 
@@ -377,6 +381,7 @@ void client_init(char* send_file) {
                     fprintf(stderr, " (No description available)\n");
             }
             /* Free the device list */
+		 pcap_freealldevs(alldevs);
             return;
         }
     }
@@ -417,6 +422,8 @@ void client_init(char* send_file) {
     seconds = difftime(end, start);
     printf("File transfer took %.2lf seconds to run.\n", seconds);
     printf("Sending finished\n");
+
+	free(packets);
 
 
 }
