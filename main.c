@@ -2,7 +2,7 @@
 // Predmet: Osnovi racunarskih mreza 2
 // Godina studija: III godina
 // Semestar: Letnji (VI)
-// Skolska godina: 2015/2016
+
 // Datoteka: project.c
 
 #ifdef _MSC_VER
@@ -34,8 +34,8 @@ pthread_mutex_t mutex;
 
 #define SIGNATURE 54654
 #define ACK_TRIES 10
-char ip_src[][64]={"10.81.2.102"};
-char ip_dst[][64]={"10.81.2.94"};
+char ip_src[][12]={"10.81.31.51","10.81.2.102"};
+char ip_dst[][12]={"10.81.31.49","10.81.2.94"};
 char devices_client[][64] = { "eth0", "wlan0" };
 char devices_server[][64] = { "eth0", "wlan1" };
 #define N_DEVICES 2
@@ -75,7 +75,7 @@ int main(int argc, char* argv[])
     }
     pthread_mutex_destroy(&mutex);
 
-    struct ethhdr;
+
     return 0;
 }
 
@@ -91,6 +91,8 @@ struct t_context {
     char smac[6];
     char dmac[6];
     char name[6];
+    char ip_src[N_DEVICES][12];
+    char ip_dst[N_DEVICES][12];
     pcap_t* p;
 };
 
@@ -110,11 +112,6 @@ enum {
     UNSENT
 };
 
-struct eth_header {
-    char dmac[6];
-    char smac[6];
-    short type;
-};
 
 struct my_header {
     // handled by packet_process
@@ -174,7 +171,7 @@ in_cksum(unsigned short *addr, int len)
 }
 
 void
-ip_output(struct ip *ip_header, int len)
+ip_output(context *c,struct ip *ip_header, int len)
 {
 
 
@@ -227,11 +224,11 @@ int packet_size(const struct packet* pkt) {
     return sizeof(struct packet) + pkt->header.data_size - PACKET_SIZE;
 }
 
-void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
+void packet_process(context *c,struct packet* pkt, enum packet_type type, int data_size) {
 
     int size = sizeof(struct iphdr)+sizeof(struct udphdr)+data_size+sizeof(struct my_header);
     pkt->ethernet.h_proto = htons(0x0800);
-    ip_output(&pkt->ip2,size);
+    ip_output(c,&pkt->ip2,size);
     pkt->udp_hdr.uh_dport=htons(0x5000);
     pkt->udp_hdr.uh_sport=htons(0x5000);
 
@@ -269,8 +266,8 @@ void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
 
 
 
-void send_packet(pcap_t* p, struct packet* pkt, enum packet_type type, int data_size) {
-    packet_process(pkt, type, data_size);
+void send_packet(context *c, struct packet* pkt, enum packet_type type, int data_size) {
+    packet_process(context *c,pkt, type, data_size);
     printf("Sending packet size: %d (", pkt->header.data_size);
     printf("D=");
        print_mac(pkt->ethernet.h_dest);
@@ -278,7 +275,7 @@ void send_packet(pcap_t* p, struct packet* pkt, enum packet_type type, int data_
        printf("S=");
        print_mac(pkt->ethernet.h_source);
        printf(")\n");
-    pcap_sendpacket(p, (const u_char*)pkt, packet_size(pkt));
+    pcap_sendpacket(c->p, (const u_char*)pkt, packet_size(pkt));
 }
 
 void send_ack(context* t, int ack_id) {
@@ -287,7 +284,7 @@ void send_ack(context* t, int ack_id) {
     memcpy(pkt.ethernet.h_source, t->smac, 6);
 
     pkt.header.ack_id = ack_id;
-    send_packet(t->p, &pkt, pkt_ack, 0);
+    send_packet(t, &pkt, pkt_ack, 0);
 }
 
 
@@ -471,11 +468,19 @@ void server(context *c) {
             printf("Writing data: offs: %d size: %d\n", pkt->header.offset, pkt->header.data_size);
             fseek(file, pkt->header.offset, SEEK_SET);
             fwrite(pkt->data, 1, pkt->header.data_size, file);
-            pthread_mutex_unlock(&mutex);
+
             send_ack(c, pkt->header.ack_id);
+            pthread_mutex_unlock(&mutex);
         }
         else if (pkt->header.type == pkt_eof) {
-            break;
+            printf("D=");
+            print_mac(pkt->ethernet.h_dest);
+            printf("\t");
+            printf("S=");
+            print_mac(pkt->ethernet.h_source);
+            printf(")\n");
+           // send_ack(c, pkt->header.ack_id);
+            pthread_exit(NULL);
         }
         printf("Waiting for next pkt\n");
     }
@@ -513,6 +518,8 @@ void server_init(char *recvfile) {
         memcpy(mak[i].dmac, macs[i * 2 + 1], 6);
         memcpy(mak[i].smac, macs[i * 2], 6);
         strcpy(mak[i].name,devices_server[i]);
+        strcpy(mak[i].ip_src[i],ip_src[i]);
+        strcpy(mak[i].ip_dst[i],ip_dst[i]);
         pthread_create(&threads[i], NULL,(void *)server, &mak[i]);
     }
 
