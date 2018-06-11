@@ -37,11 +37,13 @@ pthread_mutex_t mutex;
 
 char devices_client[][64] = { "eth0", "wlan0" };
 char devices_server[][64] = { "eth0", "wlan1" };
-#define N_DEVICES 2
+#define N_DEVICES 1
 
 // za klijenta (i server koristi iste podatke samo ih cita obrnuto)
-char macs[][6] = {"\x2c\x4d\x54\x56\x99\xeb",// dmac dev0  2c:4d:54:56:99:eb
-                  "\x2c\x4d\x54\xd0\x63\xb8",// smac dev0
+char macs[][6] = {
+                    "\x2c\x4d\x54\x56\x99\xeb", // smac dev0
+                    "\x2c\x4d\x54\xd0\x63\xb8",// dmac dev0  2c:4d:54:56:99:eb
+
 
                   "\x00\x0f\x60\x05\x53\x94",// dmac dev1 00:0f:60:06:07:14
                   "\x00\x0f\x60\x04\x51\xe2" // smac dev1  b8:27:eb:b9:80:45
@@ -183,8 +185,8 @@ ip_output(struct ip *ip_header, int len)
     ip_header->ip_ttl = 64;
     ip_header->ip_p = IPPROTO_UDP;
     ip_header->ip_sum = htons(0x0000);
-    ip_header->ip_src.s_addr = inet_addr("192.168.0.15");
-    ip_header->ip_dst.s_addr =  inet_addr("192.168.0.15");;
+    ip_header->ip_src.s_addr = inet_addr("10.81.31.49");
+    ip_header->ip_dst.s_addr =  inet_addr("10.81.31.51");;
 
     ip_header->ip_sum = in_cksum((unsigned short *) ip_header, sizeof(struct ip));
 
@@ -227,8 +229,8 @@ void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
     int size = sizeof(struct iphdr)+sizeof(struct udphdr)+data_size+sizeof(struct my_header);
     pkt->ethernet.h_proto = htons(0x0800);
     ip_output(&pkt->ip2,size);
-    pkt->udp_hdr.uh_dport=htons(0x1040);
-    pkt->udp_hdr.uh_sport=htons(0x2040);
+    pkt->udp_hdr.uh_dport=htons(0x5000);
+    pkt->udp_hdr.uh_sport=htons(0x5000);
 
     if(data_size==0){
         pkt->udp_hdr.uh_ulen=htons(8+sizeof(struct my_header));
@@ -257,15 +259,15 @@ void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
     psh.protocol = IPPROTO_UDP;
     psh.udp_length = htons(sizeof(struct udphdr) +  data_size );
     int psize=sizeof(struct my_header)+ sizeof(struct udphdr) + data_size;
-    char *pseudogram;
+   /* char *pseudogram;
     pseudogram = malloc(psize);
     memcpy(pseudogram , (char*) &psh , sizeof (struct pseudo_header));
-    memcpy(pseudogram + sizeof(struct pseudo_header) , &pkt->udp_hdr , sizeof(struct udphdr) +sizeof(struct my_header)+data_size );
+    memcpy(pseudogram + sizeof(struct pseudo_header) , &pkt->udp_hdr , sizeof(struct udphdr) +sizeof(struct my_header)+data_size );*/
 
-    pkt->udp_hdr.uh_sum=in_cksum((unsigned short *)pseudogram , psize);
-    if(pseudogram!=NULL){
+    pkt->udp_hdr.uh_sum=htons(0x3423);/*in_cksum((unsigned short *)pseudogram , psize);*/
+/*    if(pseudogram!=NULL){
         free(pseudogram);
-    }
+    }*/
 
 }
 
