@@ -35,18 +35,19 @@ pthread_mutex_t mutex;
 #define SIGNATURE 54654
 #define ACK_TRIES 10
 
-char devices_client[][64] = { "eth0", "wlan0" };
-char devices_server[][64] = { "eth0", "wlan1" };
+char devices_client[][64] = { /*"eth0",*/ "wlan0" };
+char devices_server[][64] = { /*"eth0",*/ "wlan1" };
 #define N_DEVICES 1
 
 // za klijenta (i server koristi iste podatke samo ih cita obrnuto)
 char macs[][6] = {
-                    "\x2c\x4d\x54\x56\x99\xeb", // smac dev0
-                    "\x2c\x4d\x54\xd0\x63\xb8",// dmac dev0  2c:4d:54:56:99:eb
+      /*  "\x2c\x4d\x54\xd0\x63\xb8",// dmac dev0  2c:4d:54:56:99:eb
+        "\x2c\x4d\x54\x56\x99\xeb", // smac dev0*/
 
 
-                  "\x00\x0f\x60\x05\x53\x94",// dmac dev1 00:0f:60:06:07:14
-                  "\x00\x0f\x60\x04\x51\xe2" // smac dev1  b8:27:eb:b9:80:45
+
+        "\x00\x0f\x60\x05\x53\x94",// dmac dev1 00:0f:60:06:07:14
+        "\x00\x0f\x60\x04\x51\xe2" // smac dev1  b8:27:eb:b9:80:45
 };
 struct pseudo_header
 {
@@ -185,8 +186,8 @@ ip_output(struct ip *ip_header, int len)
     ip_header->ip_ttl = 64;
     ip_header->ip_p = IPPROTO_UDP;
     ip_header->ip_sum = htons(0x0000);
-    ip_header->ip_src.s_addr = inet_addr("10.81.31.49");
-    ip_header->ip_dst.s_addr =  inet_addr("10.81.31.51");;
+    ip_header->ip_src.s_addr = /*inet_addr("10.81.31.51");*/ inet_addr("10.81.2.102");
+    ip_header->ip_dst.s_addr = /* inet_addr("10.81.31.49");;*/inet_addr("10.81.2.94");
 
     ip_header->ip_sum = in_cksum((unsigned short *) ip_header, sizeof(struct ip));
 
@@ -258,16 +259,9 @@ void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
     psh.placeholder = 0;
     psh.protocol = IPPROTO_UDP;
     psh.udp_length = htons(sizeof(struct udphdr) +  data_size );
-    int psize=sizeof(struct my_header)+ sizeof(struct udphdr) + data_size;
-   /* char *pseudogram;
-    pseudogram = malloc(psize);
-    memcpy(pseudogram , (char*) &psh , sizeof (struct pseudo_header));
-    memcpy(pseudogram + sizeof(struct pseudo_header) , &pkt->udp_hdr , sizeof(struct udphdr) +sizeof(struct my_header)+data_size );*/
 
-    pkt->udp_hdr.uh_sum=htons(0x3423);/*in_cksum((unsigned short *)pseudogram , psize);*/
-/*    if(pseudogram!=NULL){
-        free(pseudogram);
-    }*/
+
+    pkt->udp_hdr.uh_sum=htons(0x3423);
 
 }
 
@@ -289,8 +283,7 @@ void send_ack(context* t, int ack_id) {
     struct packet pkt;
     memcpy(pkt.ethernet.h_dest, t->dmac, 6);
     memcpy(pkt.ethernet.h_source, t->smac, 6);
-    /*  memcpy(pkt.ethernet.dmac, t->dmac, 6);
-      memcpy(pkt.ethernet.smac, t->smac, 6);*/
+
     pkt.header.ack_id = ack_id;
     send_packet(t->p, &pkt, pkt_ack, 0);
 }
@@ -431,10 +424,10 @@ void client_init(char* send_file) {
 }
 
 
-void server(void* m) {
+void server(context *c) {
     struct pcap_pkthdr d;
     struct packet *pkt;
-    struct t_context *c=m;
+   // struct t_context *c=m;
     int mac_initialized = 0;
     while (1) {
         const char * data = pcap_next(c->p, &d);
@@ -446,8 +439,8 @@ void server(void* m) {
         if(pkt->header.signature != SIGNATURE) continue;
 
         if(mac_initialized == 0) {
-            memcpy(c->dmac, pkt->ethernet.h_dest, 6);
-            memcpy(c->smac, pkt->ethernet.h_source, 6);
+            memcpy(c->smac, pkt->ethernet.h_dest, 6);
+            memcpy(c->dmac, pkt->ethernet.h_source, 6);
             /* memcpy(c->dmac, pkt->ethernet.smac, 6);
              memcpy(c->smac, pkt->ethernet.dmac, 6);*/
             mac_initialized = 1;
