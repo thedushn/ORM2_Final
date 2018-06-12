@@ -435,6 +435,7 @@ void client_init(char* send_file) {
     seconds = difftime(end, start);
     printf("File transfer took %.2lf seconds to run.\n", seconds);
     printf("Sending finished\n");
+    printf("sending speed was %.2lf bytes/s ",size/seconds);
 
     free(packets);
 
