@@ -2,7 +2,7 @@
 // Predmet: Osnovi racunarskih mreza 2
 // Godina studija: III godina
 // Semestar: Letnji (VI)
-// Skolska godina: 2015/2016
+
 // Datoteka: project.c
 
 #ifdef _MSC_VER
@@ -17,7 +17,6 @@
 #include<net/ethernet.h>
 #include <netinet/udp.h>
 #include <netinet/ip.h>
-#include <netinet/tcp.h>
 #include <time.h>
 #include "arpa/inet.h"
 #endif
@@ -29,53 +28,48 @@
 #include <pthread.h>
 #include <zconf.h>
 
+
 void server_init(char *recvfile);
 void client_init(char* send_file);
 pthread_mutex_t mutex;
+struct t_context {
+    char smac[6];
+    char dmac[6];
+    char name[6];
+    char ip_src[12];
+    char ip_dst[12];
+    pcap_t* p;
+};
 
+typedef struct t_context context;
 #define SIGNATURE 54654
 #define ACK_TRIES 10
+char ip[][12]={"10.81.31.51", //dev0//eth0
+               "10.81.2.102",// dev0 //wlan
+
+               "10.81.31.49",//dev1 eth0
+               "10.81.2.94"   //dev1 wlan
+};
 
 char devices_client[][64] = { "eth0", "wlan0" };
-char devices_server[][64] = { /*"eth0",*/ "wlan1" };
+char devices_server[][64] = { "eth0", "wlan1" };
 #define N_DEVICES 2
-
+pthread_t threads[N_DEVICES];
 // za klijenta (i server koristi iste podatke samo ih cita obrnuto)
 char macs[][6] = {
-                    "\x2c\x4d\x54\x56\x99\xeb", // smac dev0
-                    "\x2c\x4d\x54\xd0\x63\xb8",// dmac dev0  2c:4d:54:56:99:eb
+        "\x2c\x4d\x54\xd0\x63\xb8",// dmac dev0  2c:4d:54:56:99:eb
+        "\x2c\x4d\x54\x56\x99\xeb", // smac dev0
 
-                  "\x00\x0f\x60\x05\x53\x94",// dmac dev1 00:0f:60:06:07:14
-                  "\x00\x0f\x60\x04\x51\xe2" // smac dev1  b8:27:eb:b9:80:45
-};
-struct pseudo_header
-{
-    u_int32_t source_address;
-    u_int32_t dest_address;
-    u_int8_t placeholder;
-    u_int8_t protocol;
-    u_int16_t udp_length;
+
+
+        "\x00\x0f\x60\x05\x53\x94",// dmac dev1 00:0f:60:06:07:14
+        "\x00\x0f\x60\x04\x51\xe2" // smac dev1  b8:27:eb:b9:80:45
 };
 
 
-int main(int argc, char* argv[])
-{
-    pthread_mutex_init(&mutex,NULL);
-    if (argc != 3) return 0;
-    char* filename = argv[2];
-    char* role = argv[1];
-    if (strcmp(role, "server") == 0) {
-        printf("setting up server\n");
-        server_init(filename);
-    } else {
-        printf("setting up client\n");
-        client_init(filename);
-    }
-    pthread_mutex_destroy(&mutex);
 
-    struct ethhdr;
-    return 0;
-}
+
+
 
 
 FILE* file;
@@ -85,16 +79,9 @@ int file_size;
 int *packets;
 
 
-struct t_context {
-    char smac[6];
-    char dmac[6];
-    char name[6];
-    pcap_t* p;
-};
 
-typedef struct t_context context;
 int packet_num;
-#define MAC_HEADER 12
+
 
 enum packet_type {
     pkt_ack,
@@ -108,11 +95,6 @@ enum {
     UNSENT
 };
 
-struct eth_header {
-    char dmac[6];
-    char smac[6];
-    short type;
-};
 
 struct my_header {
     // handled by packet_process
@@ -128,13 +110,31 @@ struct my_header {
 
 struct packet {
     struct ethhdr ethernet;
-    //struct eth_header ethernet;
     struct ip ip2;
     struct udphdr udp_hdr;
     struct my_header header;
     char data[PACKET_SIZE];
 }__attribute__((packed));
 
+void packet_process(context *c,struct packet* pkt, enum packet_type type, int data_size);
+int main(int argc, char* argv[])
+{
+    pthread_mutex_init(&mutex,NULL);
+    if (argc != 3) return 0;
+    char* filename = argv[2];
+    char* role = argv[1];
+    if (strcmp(role, "server") == 0) {
+        printf("setting up server\n");
+        server_init(filename);
+    } else {
+        printf("setting up client\n");
+        client_init(filename);
+    }
+    pthread_mutex_destroy(&mutex);
+
+
+    return 0;
+}
 void print_mac(char* mac) {
     int i;
     for (i = 0; i < 6; i++) {
@@ -167,12 +167,12 @@ in_cksum(unsigned short *addr, int len)
     /* add back carry outs from top 16 bits to low 16 bits */
     sum = (sum >> 16) + (sum & 0xffff);     /* add hi 16 to low 16 */
     sum += (sum >> 16);             /* add carry */
-    answer = ~sum;              /* truncate to 16 bits */
+    answer =(unsigned short) ~sum;              /* truncate to 16 bits */
     return (answer);
 }
 
 void
-ip_output(struct ip *ip_header, int len)
+ip_output(context *c,struct ip *ip_header, int len)
 {
 
 
@@ -180,23 +180,25 @@ ip_output(struct ip *ip_header, int len)
     ip_header->ip_v= 4;
     ip_header->ip_hl= 5;
     ip_header->ip_tos =htons (0x0004);
-    ip_header->ip_len = htons(len);
+    ip_header->ip_len = htons((uint16_t)len);
     ip_header->ip_id = htons(0x0001);
     ip_header->ip_off = 0;
     ip_header->ip_ttl = 64;
     ip_header->ip_p = IPPROTO_UDP;
     ip_header->ip_sum = htons(0x0000);
-    ip_header->ip_src.s_addr = inet_addr("10.81.2.94");
-    ip_header->ip_dst.s_addr =  inet_addr("10.81.2.102");;
+    ip_header->ip_src.s_addr = inet_addr(c->ip_src);
+    ip_header->ip_dst.s_addr = inet_addr(c->ip_dst);
+
+
 
     ip_header->ip_sum = in_cksum((unsigned short *) ip_header, sizeof(struct ip));
 
 }
 int wait_for_ack(context *c, int ack_id) {
-    struct pcap_pkthdr d;
+    struct pcap_pkthdr *d;
     struct packet *pkt;
     char errbuf[PCAP_ERRBUF_SIZE];
-    const char * data;
+    const u_char * data;
     int i;
     for (i = 0; i < ACK_TRIES; i++) {
         int err = pcap_next_ex(c->p, &d,&data);
@@ -205,15 +207,15 @@ int wait_for_ack(context *c, int ack_id) {
             continue;
         if (err == -1) {
             c->p = NULL;
-                sleep(1);
+            sleep(1);
             do {
                 printf("Hello someone touched things\n");
 
                 c->p= pcap_open_live(c->name, 65536,            // portion of the packet to capture.
                         // 65536 grants that the whole packet will be captured on all the MACs.
-                                      1,                // promiscuous mode (nonzero means promiscuous)
-                                      1000,            // read timeout
-                                      errbuf);
+                                     1,                // promiscuous mode (nonzero means promiscuous)
+                                     1000,            // read timeout
+                                     errbuf);
             } while (c->p == NULL);
         }
 
@@ -222,13 +224,13 @@ int wait_for_ack(context *c, int ack_id) {
         if (pkt->header.signature != SIGNATURE) continue;
 
         printf("Received: %d,  %d = %d (", pkt->header.type, pkt->header.ack_id, ack_id);
-           printf("D=");
-           print_mac(pkt->ethernet.h_dest);
-           printf("\t");
-           printf("S=");
-           print_mac(pkt->ethernet.h_source);
+        printf("D=");
+        print_mac((char *)pkt->ethernet.h_dest);
+        printf("\t");
+        printf("S=");
+        print_mac((char *)pkt->ethernet.h_source);
 
-           printf(") \n");
+        printf(") \n");
 
         if (pkt->header.type == pkt_ack) {
             if (pkt->header.ack_id == ack_id) {
@@ -241,15 +243,16 @@ int wait_for_ack(context *c, int ack_id) {
 
 
 
+
 int packet_size(const struct packet* pkt) {
     return sizeof(struct packet) + pkt->header.data_size - PACKET_SIZE;
 }
 
-void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
+void packet_process(context *c,struct packet* pkt, enum packet_type type, int data_size) {
 
     int size = sizeof(struct iphdr)+sizeof(struct udphdr)+data_size+sizeof(struct my_header);
     pkt->ethernet.h_proto = htons(0x0800);
-    ip_output(&pkt->ip2,size);
+    ip_output(c,&pkt->ip2,size);
     pkt->udp_hdr.uh_dport=htons(0x5000);
     pkt->udp_hdr.uh_sport=htons(0x5000);
 
@@ -272,52 +275,34 @@ void packet_process(struct packet* pkt, enum packet_type type, int data_size) {
     for(int i=0; i < data_size; i++) {
         pkt->header.sum += pkt->data[i];
     }
-    struct pseudo_header psh;
-    //Now the UDP checksum using the pseudo header
-    psh.source_address = htons(0x00000000);
-    psh.dest_address = 0xFFFFFFFF;
-    psh.placeholder = 0;
-    psh.protocol = IPPROTO_UDP;
-    psh.udp_length = htons(sizeof(struct udphdr) +  data_size );
-    int psize=sizeof(struct my_header)+ sizeof(struct udphdr) + data_size;
-   /* char *pseudogram;
-    pseudogram = malloc(psize);
-    memcpy(pseudogram , (char*) &psh , sizeof (struct pseudo_header));
-    memcpy(pseudogram + sizeof(struct pseudo_header) , &pkt->udp_hdr , sizeof(struct udphdr) +sizeof(struct my_header)+data_size );*/
 
-    pkt->udp_hdr.uh_sum=htons(0x3423);/*in_cksum((unsigned short *)pseudogram , psize);*/
-/*    if(pseudogram!=NULL){
-        free(pseudogram);
-    }*/
+
+
+    pkt->udp_hdr.uh_sum=htons(0x3423);
 
 }
 
 
 
-void send_packet(pcap_t* p, struct packet* pkt, enum packet_type type, int data_size) {
-    struct pcap_pkthdr d;
-    char errbuf[PCAP_ERRBUF_SIZE];
-    const char * data;
-    packet_process(pkt, type, data_size);
+void send_packet(context *c, struct packet* pkt, enum packet_type type, int data_size) {
+    packet_process( c,pkt, type, data_size);
     printf("Sending packet size: %d (", pkt->header.data_size);
     printf("D=");
-       print_mac(pkt->ethernet.h_dest);
-       printf("\t");
-       printf("S=");
-       print_mac(pkt->ethernet.h_source);
-       printf(")\n");
-    pcap_sendpacket(p, (const u_char*)pkt, packet_size(pkt));
-
+    print_mac((char *)pkt->ethernet.h_dest);
+    printf("\t");
+    printf("S=");
+    print_mac((char *)pkt->ethernet.h_source);
+    printf(")\n");
+    pcap_sendpacket(c->p, (const u_char*)pkt, packet_size(pkt));
 }
 
 void send_ack(context* t, int ack_id) {
     struct packet pkt;
     memcpy(pkt.ethernet.h_dest, t->dmac, 6);
     memcpy(pkt.ethernet.h_source, t->smac, 6);
-    /*  memcpy(pkt.ethernet.dmac, t->dmac, 6);
-      memcpy(pkt.ethernet.smac, t->smac, 6);*/
+
     pkt.header.ack_id = ack_id;
-    send_packet(t->p, &pkt, pkt_ack, 0);
+    send_packet(t, &pkt, pkt_ack, 0);
 }
 
 
@@ -325,12 +310,11 @@ void send_ack(context* t, int ack_id) {
 
 void client(context *c) {
     int i;
-    int packet_to_send = -1;
+    int packet_to_send ;
     struct packet pkt;
     memcpy(pkt.ethernet.h_dest, c->dmac, 6);
     memcpy(pkt.ethernet.h_source, c->smac, 6);
-    /* memcpy(pkt.ethernet.dmac, c->dmac, 6);
-     memcpy(pkt.ethernet.smac, c->smac, 6);*/
+
     printf("Sending file with size %d\n", file_size);
     int ack_id = 0;
     while (1) {
@@ -344,22 +328,7 @@ void client(context *c) {
             }
         }
         if (packet_to_send == -1) {
-            pkt.header.ack_id = rand() % 5000;
-            send_packet(c->p, &pkt, pkt_eof, 0);
-            printf("sending eof\n");
-            ack_id = pkt.header.ack_id;
-          /*  if (wait_for_ack(c, ack_id)) {
-                packets[packet_to_send] = SENT;
-                printf("Marking as sent\n");
-            }*/
-
-         /*   if (wait_for_ack(c, ack_id)) {
-
-            }
-            else {
-
-                printf("ACK not received, waiting for ACK\n");
-            }*/
+            send_packet(c, &pkt, pkt_eof, 0);
             return;
         }
         printf("Sending packet %d\n", packet_to_send);
@@ -368,11 +337,11 @@ void client(context *c) {
         // ucitaj paket
         pthread_mutex_lock(&mutex);
         fseek(file, packet_to_send*PACKET_SIZE, SEEK_SET);
-        fread(pkt.data, 1, size, file);
+        fread(pkt.data, 1, (size_t)size, file);
 
         pkt.header.offset = packet_to_send*PACKET_SIZE;
         pkt.header.ack_id = rand() % 5000;
-        send_packet(c->p, &pkt, pkt_data, size);
+        send_packet(c, &pkt, pkt_data, size);
         ack_id = pkt.header.ack_id;
         pthread_mutex_unlock(&mutex);
         if (wait_for_ack(c, ack_id)) {
@@ -428,7 +397,7 @@ void client_init(char* send_file) {
         }
     }
 
-    pthread_t threads[N_DEVICES];
+    // pthread_t threads[N_DEVICES];
     context ctx[N_DEVICES];
     file = fopen(send_file, "rb");
     if (!file)  {
@@ -437,7 +406,7 @@ void client_init(char* send_file) {
     }
     int size;
     fseek(file, 0, SEEK_END);
-    size = ftell(file);
+    size = (int)ftell(file);
     file_size = size;
     packet_num = (size / PACKET_SIZE + 1);
     printf("packet_num: %d\n", packet_num);
@@ -454,6 +423,8 @@ void client_init(char* send_file) {
         ctx[i].p = dev[i];
         memcpy(ctx[i].dmac, macs[i * 2], 6);
         memcpy(ctx[i].smac, macs[i * 2 + 1], 6);
+        memcpy(ctx[i].ip_src,ip[i*2+1],12);
+        memcpy(ctx[i].ip_dst,ip[i * 2],12);
         pthread_create(&threads[i], NULL,(void *)client, &ctx[i]);
     }
     printf("Waiting for transfer to finish\n");
@@ -464,7 +435,6 @@ void client_init(char* send_file) {
     seconds = difftime(end, start);
     printf("File transfer took %.2lf seconds to run.\n", seconds);
     printf("Sending finished\n");
-    printf("sending speed was %.2lf bytes/s ",size/seconds);
 
     free(packets);
 
@@ -472,14 +442,32 @@ void client_init(char* send_file) {
 }
 
 
-void server(void* m) {
-    struct pcap_pkthdr d;
+void server(context *c) {
+    struct pcap_pkthdr *d;
     struct packet *pkt;
-    struct t_context *c=m;
+    char errbuf[PCAP_ERRBUF_SIZE];
+    const u_char * data;
+
     int mac_initialized = 0;
     while (1) {
-        const char * data = pcap_next(c->p, &d);
+        int err  = pcap_next_ex(c->p, &d,&data);
 
+
+        if(err == 0)
+            continue;
+        if (err == -1) {
+            c->p = NULL;
+
+            do {
+                printf("Hello someone touched things\n");
+
+                c->p = pcap_open_live(c->name, 65536,            // portion of the packet to capture.
+                        // 65536 grants that the whole packet will be captured on all the MACs.
+                                      1,                // promiscuous mode (nonzero means promiscuous)
+                                      1000,            // read timeout
+                                      errbuf);
+            } while (c->p == NULL);
+        }
         if (!data) continue;
 
 
@@ -487,10 +475,9 @@ void server(void* m) {
         if(pkt->header.signature != SIGNATURE) continue;
 
         if(mac_initialized == 0) {
-            memcpy(c->dmac, pkt->ethernet.h_dest, 6);
-            memcpy(c->smac, pkt->ethernet.h_source, 6);
-            /* memcpy(c->dmac, pkt->ethernet.smac, 6);
-             memcpy(c->smac, pkt->ethernet.dmac, 6);*/
+            memcpy(c->smac, pkt->ethernet.h_dest, 6);
+            memcpy(c->dmac, pkt->ethernet.h_source, 6);
+
             mac_initialized = 1;
         }
         printf("Received pkt type %d %d\n", pkt->header.type, pkt->header.offset);
@@ -498,15 +485,24 @@ void server(void* m) {
             pthread_mutex_lock(&mutex);
             printf("Writing data: offs: %d size: %d\n", pkt->header.offset, pkt->header.data_size);
             fseek(file, pkt->header.offset, SEEK_SET);
-            fwrite(pkt->data, 1, pkt->header.data_size, file);
-            pthread_mutex_unlock(&mutex);
+            fwrite(pkt->data, 1,(size_t) pkt->header.data_size, file);
+
             send_ack(c, pkt->header.ack_id);
+            pthread_mutex_unlock(&mutex);
         }
         else if (pkt->header.type == pkt_eof) {
-            break;
+            printf("D=");
+            print_mac((char *)pkt->ethernet.h_dest);
+            printf("\t");
+            printf("S=");
+            print_mac((char *)pkt->ethernet.h_source);
+            printf(")\n");
+            // send_ack(c, pkt->header.ack_id);
+            pthread_exit(NULL);
         }
         printf("Waiting for next pkt\n");
     }
+
 }
 
 void server_init(char *recvfile) {
@@ -530,7 +526,7 @@ void server_init(char *recvfile) {
         }
     }
 
-    pthread_t threads[N_DEVICES];
+
     struct t_context mak[N_DEVICES];
     file = fopen(recvfile, "wb");
 
@@ -539,6 +535,9 @@ void server_init(char *recvfile) {
 
         memcpy(mak[i].dmac, macs[i * 2 + 1], 6);
         memcpy(mak[i].smac, macs[i * 2], 6);
+        strcpy(mak[i].name,devices_server[i]);
+        memcpy(mak[i].ip_src,ip[i*2],12);
+        memcpy(mak[i].ip_dst,ip[i * 2 + 1],12);
         pthread_create(&threads[i], NULL,(void *)server, &mak[i]);
     }
 
